@@ -1,0 +1,9 @@
+# Apple Systems
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# knowHowWiki Data Directories
+raw/
+processed/
+wiki/
