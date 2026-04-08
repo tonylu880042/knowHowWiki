@@ -35,6 +35,65 @@ knowHowWiki/
                            Reviews/ (複習)
 ```
 
+## 🦆 本地搜尋架構：為什麼選 DuckDB？
+
+`knowHowWiki` 的知識庫檢索層由 **DuckDB + Full-Text Search** 驅動，索引檔為 `processed/wiki_index.duckdb`。這是一個刻意的技術選型，解決了「個人知識庫檢索」這個場景中最常見的痛點。
+
+### 與常見方案的對比
+
+| 面向 | DuckDB（本專案） | NotebookLM / 雲端 RAG | Pinecone / pgvector | Obsidian 內建搜尋 |
+|------|------------------|-----------------------|---------------------|-------------------|
+| **部署複雜度** | ✅ 單一檔案，零配置 | ⚠️ 需註冊、登入、token | ❌ 需 server / 雲服務 | ✅ 內建 |
+| **隱私** | ✅ **100% 本機** | ❌ 資料上傳雲端 | ❌ 多半雲端 | ✅ 本機 |
+| **成本** | ✅ **零** | ⚠️ Google 帳號/配額 | ❌ 按用量計費 | ✅ 零 |
+| **中文 FTS** | ✅ 原生支援 | ✅ 支援 | ⚠️ 需自建 embedding | ⚠️ 基礎 |
+| **SQL 組合查詢** | ✅ **完整 SQL** | ❌ 黑箱 API | ⚠️ 有限 | ❌ 無 |
+| **可 programmatic 存取** | ✅ 任何語言都有 driver | ⚠️ 需 API wrapper | ✅ API | ❌ |
+| **離線可用** | ✅ | ❌ | ❌ | ✅ |
+| **版控策略** | ✅ 可選擇不追蹤（秒級重建） | N/A | N/A | ⚠️ 需 plugin |
+
+### DuckDB 的七大優勢
+
+1. **🔒 隱私 100% 留在本機**
+   所有知識、決策、私人筆記都不會離開你的硬碟。適合商業機密、個人日記、未公開研究等敏感內容。
+
+2. **💰 零成本、零依賴**
+   DuckDB 是 MIT 授權的 embedded database，沒有 server、沒有 API 費用、沒有額度上限。一個 `.duckdb` 檔就是全部。
+
+3. **⚡ 重建索引秒級完成**
+   100 個 markdown 檔案的完整索引只需要幾百 ms。這個速度讓我們敢把 `wiki_index.duckdb` **放進 `.gitignore`** —— 不需要同步 binary 檔，新機器 `git clone` 後跑一次 `update_duckdb.py` 就能復原。
+
+4. **🔍 原生 FTS 全文檢索**
+   開箱即用的中英文混合全文檢索，不需要另外 embed vector、不需要跑 embedding model。對 < 1000 份文件的個人知識庫，FTS 的命中率與可預測性比 semantic vector search 更好用。
+
+5. **🧮 完整 SQL 可任意組合查詢**
+   未來想加「最近 7 天更新的文件中包含 XXX 的段落」、「某主題分類下標題含 YYY 的頁面」，直接寫 SQL 就行，不需要改資料結構或訓練模型。
+
+6. **📦 單一檔案、完全 Portable**
+   跨 macOS / Linux / Windows，複製 `.duckdb` 檔就能遷移整個索引。也可以直接用 DuckDB CLI、DBeaver、Python、Node.js 等任何工具開啟。
+
+7. **🪶 輕量 vs Vector DB 的 overhead**
+   < 100MB 的個人知識庫完全不需要 Pinecone / Weaviate / pgvector 這類 vector store 的複雜度。DuckDB FTS 是「剛剛好」的解 —— 強到夠用，輕到無感。
+
+### 運作流程
+
+```
+wiki/*.md  ──┐
+             ├── update_duckdb.py ──→ processed/wiki_index.duckdb
+wiki/Reviews/ ┘         (upsert)              │
+                                              ↓
+                                    SQL / FTS query
+                                              │
+                                              ↓
+                                 llm-wiki-retriever skill
+```
+
+每次 `llm-wiki-manager` 編譯完新頁面都會自動呼叫 `update_duckdb.py` 做增量 upsert，索引永遠與 `wiki/` 實體檔案 100% 一致。
+
+> **設計哲學**：知識庫是 write-once、read-many 的場景。與其上雲端用貴鬆鬆的 vector DB，不如用一個本地的 SQL 資料庫 + FTS，把成本省下來、把隱私留住、把複雜度壓到最低。
+
+---
+
 ## 🤖 核心：兩個 AI Skills
 
 本系統的靈魂是兩個為 Agentic Coding 工具（如 Claude Code、Google Antigravity）設計的自訂技巧（Skills）。它們各自扮演不同角色，相互搭配構成完整的**知識攝取 → 結構化 → 複習**閉環。
